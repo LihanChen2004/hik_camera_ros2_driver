@@ -11,8 +11,8 @@ namespace hik_camera_ros2_driver
 class HikCameraRos2DriverNode : public rclcpp::Node
 {
 public:
-  explicit HikCameraRos2DriverNode(const rclcpp::NodeOptions & options)
-  : Node("hik_camera_ros2_driver", options)
+  explicit HikCameraRos2DriverNode(rclcpp::NodeOptions options)
+  : Node("hik_camera_ros2_driver", options.use_intra_process_comms(true))
   {
     RCLCPP_INFO(this->get_logger(), "Starting HikCameraRos2DriverNode!");
 
@@ -46,7 +46,6 @@ private:
 
     // enum device
     while (rclcpp::ok()) {
-      // enum device
       n_ret_ = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
       if (n_ret_ != MV_OK) {
         RCLCPP_ERROR(this->get_logger(), "Failed to enumerate devices, retrying...");
@@ -72,12 +71,14 @@ private:
       return false;
     }
 
+    // Get camera information
     n_ret_ = MV_CC_GetImageInfo(camera_handle_, &img_info_);
     if (n_ret_ != MV_OK) {
       RCLCPP_ERROR(this->get_logger(), "Failed to get camera image info!");
       return false;
     }
 
+    // Init convert param
     image_msg_.data.reserve(img_info_.nHeightMax * img_info_.nWidthMax * 3);
     convert_param_.nWidth = img_info_.nWidthValue;
     convert_param_.nHeight = img_info_.nHeightValue;
@@ -92,6 +93,17 @@ private:
     MVCC_FLOATVALUE f_value;
     param_desc.integer_range.resize(1);
     param_desc.integer_range[0].step = 1;
+
+    // Acquisition frame rate
+    param_desc.description = "Acquisition frame rate in Hz";
+    MV_CC_GetFloatValue(camera_handle_, "AcquisitionFrameRate", &f_value);
+    param_desc.integer_range[0].from_value = f_value.fMin;
+    param_desc.integer_range[0].to_value = f_value.fMax;
+    double acquisition_frame_rate =
+      this->declare_parameter("acquisition_frame_rate", 165.0, param_desc);
+    MV_CC_SetBoolValue(camera_handle_, "AcquisitionFrameRateEnable", true);
+    MV_CC_SetFloatValue(camera_handle_, "AcquisitionFrameRate", acquisition_frame_rate);
+    RCLCPP_INFO(this->get_logger(), "Acquisition frame rate: %f", acquisition_frame_rate);
 
     // Exposure time
     param_desc.description = "Exposure time in microseconds";
@@ -111,15 +123,7 @@ private:
     MV_CC_SetFloatValue(camera_handle_, "Gain", gain);
     RCLCPP_INFO(this->get_logger(), "Gain: %f", gain);
 
-    // Pixel format
-    param_desc.description = "Pixel Format";
-    std::string pixel_format = this->declare_parameter("pixel_format", "RGB8Packed", param_desc);
-    int status = MV_CC_SetEnumValueByString(camera_handle_, "PixelFormat", pixel_format.c_str());
-    if (status == MV_OK) {
-      RCLCPP_INFO(this->get_logger(), "Pixel Format set to %s", pixel_format.c_str());
-    } else {
-      RCLCPP_ERROR(this->get_logger(), "Failed to set Pixel Format, status = %d", status);
-    }
+    int status;
 
     // ADC Bit Depth
     param_desc.description = "ADC Bit Depth";
@@ -130,6 +134,16 @@ private:
       RCLCPP_INFO(this->get_logger(), "ADC Bit Depth set to %s", adc_bit_depth.c_str());
     } else {
       RCLCPP_ERROR(this->get_logger(), "Failed to set ADC Bit Depth, status = %d", status);
+    }
+
+    // Pixel format
+    param_desc.description = "Pixel Format";
+    std::string pixel_format = this->declare_parameter("pixel_format", "RGB8Packed", param_desc);
+    status = MV_CC_SetEnumValueByString(camera_handle_, "PixelFormat", pixel_format.c_str());
+    if (status == MV_OK) {
+      RCLCPP_INFO(this->get_logger(), "Pixel Format set to %s", pixel_format.c_str());
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Failed to set Pixel Format, status = %d", status);
     }
   }
 
@@ -145,6 +159,7 @@ private:
 
     MV_CC_StartGrabbing(camera_handle_);
 
+    // Load camera info
     camera_info_manager_ =
       std::make_unique<camera_info_manager::CameraInfoManager>(this, camera_name_);
     auto camera_info_url = this->declare_parameter(
@@ -164,9 +179,6 @@ private:
 
     image_msg_.header.frame_id = frame_id_;
     image_msg_.encoding = "rgb8";
-
-    auto start_time = std::chrono::steady_clock::now();
-    int frame_count = 0;
 
     while (rclcpp::ok()) {
       n_ret_ = MV_CC_GetImageBuffer(camera_handle_, &out_frame, 1000);
@@ -189,18 +201,16 @@ private:
         camera_pub_.publish(image_msg_, camera_info_msg_);
 
         MV_CC_FreeImageBuffer(camera_handle_, &out_frame);
-        fail_count_ = 0;
 
-        frame_count++;
-        auto current_time = std::chrono::steady_clock::now();
-        auto duration =
-          std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
-        if (duration >= 1) {
-          RCLCPP_DEBUG(
-            this->get_logger(), "Image topic publish frequency: %ld Hz", frame_count / duration);
-          start_time = current_time;
-          frame_count = 0;
+        static auto last_log_time = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_log_time).count() >= 3) {
+          MVCC_FLOATVALUE f_value;
+          MV_CC_GetFloatValue(camera_handle_, "ResultingFrameRate", &f_value);
+          RCLCPP_DEBUG(this->get_logger(), "ResultingFrameRate: %f Hz", f_value.fCurValue);
+          last_log_time = now;
         }
+
       } else {
         RCLCPP_WARN(this->get_logger(), "Get buffer failed! nRet: [%x]", n_ret_);
         MV_CC_StopGrabbing(camera_handle_);

@@ -31,6 +31,9 @@ None.
 - `gain` (double, default: `camera`)
   - The gain setting for the camera.
 
+- `acquisition_frame_rate` (double, default: `165`)
+  - The acquisition frame rate in hz for the camera.
+
 - `pixel_format` (string, default: `RGB8Packed`)
   - The pixel format for the image data. Supported values: `Mono8`, `Mono10`, `Mono12`, `RGB8Packed`, `BGR8Packed`, `YUV422_YUYV_Packed`, `YUV422Packed`, `BayerRG8`, `BayerRG10`, `BayerRG10Packed`, `BayerRG12`, `BayerRG12Packed`.
 
