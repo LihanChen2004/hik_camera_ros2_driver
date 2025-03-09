@@ -11,8 +11,8 @@ namespace hik_camera_ros2_driver
 class HikCameraRos2DriverNode : public rclcpp::Node
 {
 public:
-  explicit HikCameraRos2DriverNode(rclcpp::NodeOptions options)
-  : Node("hik_camera_ros2_driver", options.use_intra_process_comms(true))
+  explicit HikCameraRos2DriverNode(const rclcpp::NodeOptions & options)
+  : Node("hik_camera_ros2_driver", options)
   {
     RCLCPP_INFO(this->get_logger(), "Starting HikCameraRos2DriverNode!");
 
