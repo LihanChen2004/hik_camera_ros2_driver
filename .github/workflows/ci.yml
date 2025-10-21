@@ -12,7 +12,7 @@ jobs:
       image: rostooling/setup-ros-docker:ubuntu-jammy-ros-humble-desktop-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
 
       - name: Build hik_camera_ros2_driver
         uses: ros-tooling/action-ros-ci@v0.3
